@@ -1,8 +1,8 @@
-name = "visit-detector"
+name = "detector"
 main = "src/index.js"
 compatibility_date = "2026-10-04"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "visits-db"
-database_id = "YOUR_DATABASE_ID_HERE"
+database_id = "da0a59c0-6c7e-405c-8a23-962dedb24328"
