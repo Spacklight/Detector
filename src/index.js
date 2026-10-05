@@ -1,86 +1,159 @@
+import initSqlJs from 'https://esm.sh/sql.js@1.10.3';
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const path = url.pathname;
-    const ip = request.headers.get('cf-connecting-ip') || 'Unknown';
 
-    // --- 1. HANDLE /write/ COMMANDS ---
-    if (path.startsWith('/write/')) {
-      const message = decodeURIComponent(path.substring(7));
-      
-      await env.DB.prepare(
-        "INSERT INTO tasks (timestamp, ip, task_type, payload, status) VALUES (?, ?, ?, ?, ?)"
-      ).bind(new Date().toISOString(), ip, 'write', message, 'completed').run();
-
-      return await renderDashboard(env, `✅ Wrote: "${message}"`);
+    if (request.method === 'GET' && url.pathname === '/') {
+      return new Response(htmlUI, { 
+        headers: { 'content-type': 'text/html;charset=UTF-8' } 
+      });
     }
 
-    // --- 2. HANDLE /delete/ COMMANDS ---
-    if (path.startsWith('/delete/')) {
-      const target = decodeURIComponent(path.substring(8));
-      let deleteMsg = "";
+    if (request.method === 'POST' && url.pathname === '/run') {
+      try {
+        const { sql } = await request.json();
+        if (!sql || !sql.trim()) {
+          return new Response(JSON.stringify({ error: "No SQL provided" }), { status: 400 });
+        }
 
-      if (target === 'all') {
-        await env.DB.prepare("DELETE FROM tasks").run();
-        deleteMsg = "🗑️ All tasks have been wiped from the database!";
-      } else {
-        // Delete by ID or by exact payload match
-        const result = await env.DB.prepare("DELETE FROM tasks WHERE id = ? OR payload = ?").bind(target, target).run();
-        deleteMsg = `🗑️ Deleted task matching: "${target}"`;
+        const repoId = "Spacklight/ai-command-storage";
+        const fileName = "database.db";
+        const fileUrl = `https://huggingface.co/datasets/${repoId}/resolve/main/${fileName}`;
+        const uploadUrl = `https://huggingface.co/api/datasets/${repoId}/upload/main/${fileName}`;
+
+        let dbBytes = null;
+        try {
+          const downloadRes = await fetch(fileUrl, {
+            headers: { "Authorization": `Bearer ${env.HF_TOKEN}` }
+          });
+          if (downloadRes.ok) {
+            dbBytes = new Uint8Array(await downloadRes.arrayBuffer());
+          }
+        } catch (e) { /* File doesn't exist yet, start fresh */ }
+
+        const SQL = await initSqlJs({
+          locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+        });
+        
+        const db = new SQL.Database(dbBytes);
+
+        let results = [];
+        let error = null;
+        try {
+          const stmt = db.prepare(sql);
+          while (stmt.step()) {
+            results.push(stmt.getAsObject());
+          }
+          stmt.free();
+        } catch (e) {
+          error = e.message;
+        }
+
+        if (!error) {
+          const newBytes = db.export();
+          const formData = new FormData();
+          formData.append("file", new Blob([newBytes]), fileName);
+
+          await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Authorization": `Bearer ${env.HF_TOKEN}` },
+            body: formData
+          });
+        }
+
+        db.close();
+
+        return new Response(JSON.stringify({ 
+          success: !error,
+          results: results,
+          error: error 
+        }), { 
+          headers: { 'content-type': 'application/json' } 
+        });
+
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), { status: 500 });
       }
-
-      return await renderDashboard(env, deleteMsg);
     }
 
-    // --- 3. DEFAULT ROOT PAGE ---
-    if (path === '/') {
-      return await renderDashboard(env, "👋 Welcome to the AI Command Dashboard. Use /write/ or /delete/ commands.");
-    }
-
-    return new Response('404 - Path not found. Try /, /write/message, or /delete/all', { status: 404 });
+    return new Response("404 - Not Found", { status: 404 });
   }
 };
 
-// --- HELPER FUNCTION TO RENDER THE DASHBOARD ---
-async function renderDashboard(env, statusMessage) {
-  const { results } = await env.DB.prepare(
-    "SELECT * FROM tasks ORDER BY timestamp DESC LIMIT 10"
-  ).all();
+const htmlUI = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>HF-Backed SQLite Runner</title>
+    <style>
+        body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #f4f6f8; }
+        h1 { color: #ff9d00; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 120px; font-family: monospace; font-size: 15px; padding: 15px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; }
+        button { padding: 12px 24px; font-size: 16px; font-weight: bold; background: #ff9d00; color: white; border: none; cursor: pointer; border-radius: 5px; margin-top: 10px; }
+        button:hover { background: #e68a00; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: white; }
+        th, td { border: 1px solid #e1e4e8; padding: 10px; text-align: left; }
+        th { background: #f6f8fa; font-weight: 600; }
+        .error { color: #d73a49; background: #ffeef0; padding: 15px; border-radius: 5px; margin-top: 15px; font-family: monospace; }
+        .success { color: #28a745; background: #e6ffed; padding: 15px; border-radius: 5px; margin-top: 15px; }
+        .warning { color: #856404; background: #fff3cd; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤗 Hugging Face + SQLite Runner</h1>
+        <div class="warning">⚠️ <strong>Proof of Concept:</strong> This downloads the DB from HF, runs the query, and uploads it back. Simultaneous queries might overwrite each other!</div>
+        
+        <textarea id="sqlInput" placeholder="CREATE TABLE test (id INTEGER, name TEXT);"></textarea>
+        <br>
+        <button id="runBtn" onclick="runQuery()">▶ Run Query</button>
+        
+        <div id="resultArea"></div>
+    </div>
 
-  const rows = results.map(task => 
-    `<tr>
-      <td>${task.id}</td>
-      <td>${task.timestamp}</td>
-      <td><strong>${task.task_type}</strong></td>
-      <td style="color: blue; font-family: monospace;">${task.payload}</td>
-    </tr>`
-  ).join('');
+    <script>
+        async function runQuery() {
+            const sql = document.getElementById('sqlInput').value;
+            const resultArea = document.getElementById('resultArea');
+            const btn = document.getElementById('runBtn');
+            
+            btn.disabled = true;
+            btn.innerText = "Downloading DB, Running Query, Uploading...";
+            resultArea.innerHTML = "";
 
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>AI Command Dashboard</title>
-      <style>
-        body { font-family: sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background-color: #f4f4f4; }
-        .status { color: green; font-weight: bold; font-size: 1.2em; margin-bottom: 20px; }
-      </style>
-    </head>
-    <body>
-      <h1>🤖 AI Command Dashboard</h1>
-      <p class="status">${statusMessage}</p>
-      
-      <h3>Recent Tasks in Database:</h3>
-      <table>
-        <tr><th>ID</th><th>Time</th><th>Type</th><th>Payload (Message)</th></tr>
-        ${rows || '<tr><td colspan="4">Database is empty.</td></tr>'}
-      </table>
-    </body>
-    </html>
-  `;
+            try {
+                const response = await fetch('/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sql })
+                });
+                const data = await response.json();
 
-  return new Response(html, { headers: { 'content-type': 'text/html;charset=UTF-8' } });
-}
+                if (data.error) {
+                    resultArea.innerHTML = `<div class="error">❌ SQL Error: ${data.error}</div>`;
+                } else {
+                    let html = `<div class="success">✅ Query executed and saved to Hugging Face!</div>`;
+                    if (data.results && data.results.length > 0) {
+                        const headers = Object.keys(data.results[0]);
+                        let table = '<table><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
+                        data.results.forEach(row => {
+                            table += '<tr>' + headers.map(h => `<td>${row[h] !== null ? row[h] : 'NULL'}</td>`).join('') + '</tr>';
+                        });
+                        table += '</table>';
+                        html += table;
+                    }
+                    resultArea.innerHTML = html;
+                }
+            } catch (err) {
+                resultArea.innerHTML = `<div class="error">❌ Network Error: ${err.message}</div>`;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "▶ Run Query";
+            }
+        }
+    </script>
+</body>
+</html>
+`;
