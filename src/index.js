@@ -33,11 +33,9 @@ export default {
         } catch (e) { /* File doesn't exist yet, start fresh */ }
 
         // Initialize sql.js, telling it where to download the WASM file from
-        const SQL = await initSqlJs({
-          locateFile: function(file) { 
-            return "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/" + file; 
-          }
-        });
+        const wasmResponse = await fetch("https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.wasm");
+        const wasmBinary = new Uint8Array(await wasmResponse.arrayBuffer());
+        const SQL = await initSqlJs({ wasmBinary });
         
         const db = new SQL.Database(dbBytes);
 
