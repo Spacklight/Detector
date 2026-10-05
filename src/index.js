@@ -1,4 +1,4 @@
-import initSqlJs from 'https://esm.sh/sql.js@1.10.3';
+import initSqlJs from 'sql.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -32,8 +32,11 @@ export default {
           }
         } catch (e) { /* File doesn't exist yet, start fresh */ }
 
+        // Initialize sql.js, telling it where to download the WASM file from
         const SQL = await initSqlJs({
-          locateFile: function(file) { return "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/" + file; }
+          locateFile: function(file) { 
+            return "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/" + file; 
+          }
         });
         
         const db = new SQL.Database(dbBytes);
