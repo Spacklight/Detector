@@ -35,7 +35,10 @@ export default {
         // Initialize sql.js, telling it where to download the WASM file from
         const wasmResponse = await fetch("https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/sql-wasm.wasm");
         const wasmBinary = new Uint8Array(await wasmResponse.arrayBuffer());
-        const SQL = await initSqlJs({ wasmBinary });
+        const SQL = await initSqlJs({
+            wasmBinary: wasmBinary,
+            locateFile: function() { return ""; }
+        });
         
         const db = new SQL.Database(dbBytes);
 
