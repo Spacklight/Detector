@@ -19,13 +19,13 @@ export default {
 
         const repoId = "Spacklight/ai-command-storage";
         const fileName = "database.db";
-        const fileUrl = `https://huggingface.co/datasets/${repoId}/resolve/main/${fileName}`;
-        const uploadUrl = `https://huggingface.co/api/datasets/${repoId}/upload/main/${fileName}`;
+        const fileUrl = "https://huggingface.co/datasets/" + repoId + "/resolve/main/" + fileName;
+        const uploadUrl = "https://huggingface.co/api/datasets/" + repoId + "/upload/main/" + fileName;
 
         let dbBytes = null;
         try {
           const downloadRes = await fetch(fileUrl, {
-            headers: { "Authorization": `Bearer ${env.HF_TOKEN}` }
+            headers: { "Authorization": "Bearer " + env.HF_TOKEN }
           });
           if (downloadRes.ok) {
             dbBytes = new Uint8Array(await downloadRes.arrayBuffer());
@@ -33,7 +33,7 @@ export default {
         } catch (e) { /* File doesn't exist yet, start fresh */ }
 
         const SQL = await initSqlJs({
-          locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/${file}`
+          locateFile: function(file) { return "https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.10.3/" + file; }
         });
         
         const db = new SQL.Database(dbBytes);
@@ -57,7 +57,7 @@ export default {
 
           await fetch(uploadUrl, {
             method: "POST",
-            headers: { "Authorization": `Bearer ${env.HF_TOKEN}` },
+            headers: { "Authorization": "Bearer " + env.HF_TOKEN },
             body: formData
           });
         }
@@ -81,8 +81,7 @@ export default {
   }
 };
 
-const htmlUI = `
-<!DOCTYPE html>
+const htmlUI = `<!DOCTYPE html>
 <html>
 <head>
     <title>HF-Backed SQLite Runner</title>
@@ -104,42 +103,39 @@ const htmlUI = `
 <body>
     <div class="container">
         <h1>🤗 Hugging Face + SQLite Runner</h1>
-        <div class="warning">⚠️ <strong>Proof of Concept:</strong> This downloads the DB from HF, runs the query, and uploads it back. Simultaneous queries might overwrite each other!</div>
-        
+        <div class="warning">⚠️ <strong>Proof of Concept:</strong> This downloads the DB from HF, runs the query, and uploads it back.</div>
         <textarea id="sqlInput" placeholder="CREATE TABLE test (id INTEGER, name TEXT);"></textarea>
         <br>
         <button id="runBtn" onclick="runQuery()">▶ Run Query</button>
-        
         <div id="resultArea"></div>
     </div>
-
     <script>
         async function runQuery() {
-            const sql = document.getElementById('sqlInput').value;
-            const resultArea = document.getElementById('resultArea');
-            const btn = document.getElementById('runBtn');
+            var sql = document.getElementById('sqlInput').value;
+            var resultArea = document.getElementById('resultArea');
+            var btn = document.getElementById('runBtn');
             
             btn.disabled = true;
             btn.innerText = "Downloading DB, Running Query, Uploading...";
             resultArea.innerHTML = "";
 
             try {
-                const response = await fetch('/run', {
+                var response = await fetch('/run', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ sql })
+                    body: JSON.stringify({ sql: sql })
                 });
-                const data = await response.json();
+                var data = await response.json();
 
                 if (data.error) {
-                    resultArea.innerHTML = `<div class="error">❌ SQL Error: ${data.error}</div>`;
+                    resultArea.innerHTML = '<div class="error">❌ SQL Error: ' + data.error + '</div>';
                 } else {
-                    let html = `<div class="success">✅ Query executed and saved to Hugging Face!</div>`;
+                    var html = '<div class="success">✅ Query executed and saved to Hugging Face!</div>';
                     if (data.results && data.results.length > 0) {
-                        const headers = Object.keys(data.results[0]);
-                        let table = '<table><tr>' + headers.map(h => `<th>${h}</th>`).join('') + '</tr>';
-                        data.results.forEach(row => {
-                            table += '<tr>' + headers.map(h => `<td>${row[h] !== null ? row[h] : 'NULL'}</td>`).join('') + '</tr>';
+                        var headers = Object.keys(data.results[0]);
+                        var table = '<table><tr>' + headers.map(function(h) { return '<th>' + h + '</th>'; }).join('') + '</tr>';
+                        data.results.forEach(function(row) {
+                            table += '<tr>' + headers.map(function(h) { return '<td>' + (row[h] !== null ? row[h] : 'NULL') + '</td>'; }).join('') + '</tr>';
                         });
                         table += '</table>';
                         html += table;
@@ -147,7 +143,7 @@ const htmlUI = `
                     resultArea.innerHTML = html;
                 }
             } catch (err) {
-                resultArea.innerHTML = `<div class="error">❌ Network Error: ${err.message}</div>`;
+                resultArea.innerHTML = '<div class="error">❌ Network Error: ' + err.message + '</div>';
             } finally {
                 btn.disabled = false;
                 btn.innerText = "▶ Run Query";
@@ -155,5 +151,4 @@ const htmlUI = `
         }
     </script>
 </body>
-</html>
-`;
+</html>`;
